@@ -1,0 +1,6 @@
+[submodule "auth"]
+	path = auth
+	url = file:///home/kal/Desktop/opareta/auth
+[submodule "payments"]
+	path = payments
+	url = file:///home/kal/Desktop/opareta/payments
