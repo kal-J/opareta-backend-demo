@@ -1,0 +1,168 @@
+services:
+  auth:
+    build:
+      context: ./auth
+      dockerfile: Dockerfile
+    container_name: auth-service
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - JWT_SECRET=${JWT_SECRET:-15zw8t6t5q1nbo1cm97eulio4hzg2evq}
+      - NODE_ENV=${NODE_ENV:-development}
+      - DATABASE_HOST=auth-db
+      - DATABASE_PORT=5432
+      - DATABASE_USER=${DATABASE_USER:-auth_user}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-auth_password}
+      - DATABASE_NAME=auth_db
+      - DATABASE_URL=${DATABASE_URL:-postgresql://auth_user:auth_password@auth-db:5432/auth_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - ./auth/.env
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    volumes:
+      - ./auth/logs:/app/logs
+
+  auth-db:
+    image: postgres:16-alpine
+    container_name: auth-db
+    environment:
+      - POSTGRES_USER=${DATABASE_USER:-auth_user}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD:-auth_password}
+      - POSTGRES_DB=${DATABASE_NAME:-auth_db}
+    env_file:
+      - ./auth/.env
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-auth_user} -d ${POSTGRES_DB:-auth_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - opareta-network
+
+  payments:
+    build:
+      context: ./payments
+      dockerfile: Dockerfile
+    container_name: payments-service
+    ports:
+      - "3002:3002"
+    env_file:
+      - ./payments/.env
+    environment:
+      - PORT=3002
+      - AUTH_SERVICE_URL=http://auth:3001
+      - NODE_ENV=${NODE_ENV:-development}
+      - DATABASE_HOST=payments-db
+      - DATABASE_PORT=5432
+      - DATABASE_USER=${DATABASE_USER:-payments_user}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-payments_password}
+      - DATABASE_NAME=${DATABASE_NAME:-payments_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://payments_user:payments_password@payments-db:5432/payments_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      payments-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    volumes:
+      - ./payments/logs:/app/logs
+  payments-db:
+    image: postgres:16-alpine
+    container_name: payments-db
+    environment:
+      - POSTGRES_USER=${DATABASE_USER:-payments_user}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD:-payments_password}
+      - POSTGRES_DB=${DATABASE_NAME:-payments_db}
+    env_file:
+      - ./payments/.env
+    volumes:
+      - payments-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-payments_user} -d ${POSTGRES_DB:-payments_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - opareta-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - opareta-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    networks:
+      - opareta-network
+
+volumes:
+  auth-db-data:
+    driver: local
+  payments-db-data:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+
+networks:
+  opareta-network:
+    driver: bridge
+
