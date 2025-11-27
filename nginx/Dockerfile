@@ -5,6 +5,9 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY conf.d/opareta.conf /etc/nginx/conf.d/opareta.conf
 COPY conf.d/upstream.conf /etc/nginx/conf.d/upstream.conf
 
+# Remove default nginx configuration to avoid conflicts
+RUN rm -f /etc/nginx/conf.d/default.conf
+
 # Create SSL directory
 RUN mkdir -p /etc/nginx/ssl
 

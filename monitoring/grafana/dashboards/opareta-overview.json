@@ -24,8 +24,7 @@
     "panels": [
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -109,8 +108,7 @@
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -182,30 +180,19 @@
             "targets": [
                 {
                     "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
+                        "type": "prometheus"
                     },
-                    "expr": "sum(rate(http_requests_total{job=\"auth-service\"}[5m])) by (code)",
-                    "legendFormat": "Auth - {{code}}",
+                    "expr": "sum(rate(nginx_http_response_count_total{job=\"nginx-log-exporter\"}[5m])) by (status)",
+                    "legendFormat": "{{status}}",
                     "refId": "A"
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "expr": "sum(rate(http_requests_total{job=\"payments-service\"}[5m])) by (code)",
-                    "legendFormat": "Payments - {{code}}",
-                    "refId": "B"
                 }
             ],
-            "title": "Request Rate",
+            "title": "Request Rate by Status Code",
             "type": "timeseries"
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -280,48 +267,35 @@
             "targets": [
                 {
                     "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
+                        "type": "prometheus"
                     },
-                    "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"auth-service\"}[5m])) by (le, job))",
-                    "legendFormat": "Auth - p50",
+                    "expr": "nginx_http_response_time_seconds{job=\"nginx-log-exporter\",quantile=\"0.5\"}",
+                    "legendFormat": "p50",
                     "refId": "A"
                 },
                 {
                     "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
+                        "type": "prometheus"
                     },
-                    "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"auth-service\"}[5m])) by (le, job))",
-                    "legendFormat": "Auth - p95",
+                    "expr": "nginx_http_response_time_seconds{job=\"nginx-log-exporter\",quantile=\"0.95\"}",
+                    "legendFormat": "p95",
                     "refId": "B"
                 },
                 {
                     "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
+                        "type": "prometheus"
                     },
-                    "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"payments-service\"}[5m])) by (le, job))",
-                    "legendFormat": "Payments - p50",
+                    "expr": "nginx_http_response_time_seconds{job=\"nginx-log-exporter\",quantile=\"0.99\"}",
+                    "legendFormat": "p99",
                     "refId": "C"
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
-                    },
-                    "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"payments-service\"}[5m])) by (le, job))",
-                    "legendFormat": "Payments - p95",
-                    "refId": "D"
                 }
             ],
-            "title": "Request Latency (p50, p95)",
+            "title": "Request Latency (p50, p95, p99)",
             "type": "timeseries"
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -374,20 +348,18 @@
             "targets": [
                 {
                     "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
+                        "type": "prometheus"
                     },
-                    "expr": "sum(rate(http_requests_total{job=\"payments-service\",code=~\"2..\"}[5m])) / sum(rate(http_requests_total{job=\"payments-service\"}[5m])) * 100",
+                    "expr": "sum(rate(nginx_http_response_count_total{job=\"nginx-log-exporter\",status=~\"2..\"}[5m])) / clamp_min(sum(rate(nginx_http_response_count_total{job=\"nginx-log-exporter\"}[5m])), 1) * 100",
                     "refId": "A"
                 }
             ],
-            "title": "Payment Success Rate",
+            "title": "HTTP Success Rate (2xx)",
             "type": "gauge"
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -461,30 +433,27 @@
             "targets": [
                 {
                     "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
+                        "type": "prometheus"
                     },
-                    "expr": "sum(rate(http_requests_total{job=\"payments-service\",code=~\"2..\"}[5m]))",
-                    "legendFormat": "Success",
+                    "expr": "sum(rate(nginx_http_response_count_total{job=\"nginx-log-exporter\",status=~\"2..\"}[5m]))",
+                    "legendFormat": "Success (2xx)",
                     "refId": "A"
                 },
                 {
                     "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
+                        "type": "prometheus"
                     },
-                    "expr": "sum(rate(http_requests_total{job=\"payments-service\",code=~\"4..|5..\"}[5m]))",
-                    "legendFormat": "Failure",
+                    "expr": "sum(rate(nginx_http_response_count_total{job=\"nginx-log-exporter\",status=~\"4..|5..\"}[5m])) or vector(0)",
+                    "legendFormat": "Failure (4xx/5xx)",
                     "refId": "B"
                 }
             ],
-            "title": "Payment Success/Failure Rate",
+            "title": "HTTP Success/Failure Rate",
             "type": "timeseries"
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -569,8 +538,7 @@
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -664,8 +632,7 @@
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -759,8 +726,7 @@
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -854,8 +820,7 @@
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -949,8 +914,7 @@
         },
         {
             "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+                "type": "prometheus"
             },
             "fieldConfig": {
                 "defaults": {
@@ -1001,14 +965,13 @@
             "targets": [
                 {
                     "datasource": {
-                        "type": "prometheus",
-                        "uid": "prometheus"
+                        "type": "prometheus"
                     },
-                    "expr": "sum(rate(http_requests_total{job=~\"auth-service|payments-service\",code=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=~\"auth-service|payments-service\"}[5m]))",
+                    "expr": "(sum(rate(nginx_http_response_count_total{job=\"nginx-log-exporter\",status=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(nginx_http_response_count_total{job=\"nginx-log-exporter\"}[5m])), 1)",
                     "refId": "A"
                 }
             ],
-            "title": "Error Rate",
+            "title": "Error Rate (5xx)",
             "type": "gauge"
         }
     ],

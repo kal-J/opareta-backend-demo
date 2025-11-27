@@ -19,6 +19,8 @@ services:
       - REDIS_PORT=6379
     env_file:
       - ./auth/.env
+    ports:
+      - "127.0.0.1:3001:3001"
     depends_on:
       auth-db:
         condition: service_healthy
@@ -74,6 +76,8 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://payments_user:payments_password@payments-db:5432/payments_db}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+    ports:
+      - "127.0.0.1:3002:3002"
     depends_on:
       payments-db:
         condition: service_healthy
@@ -258,12 +262,29 @@ services:
     depends_on:
       - redis
 
-  # Nginx Exporter (using nginx-prometheus-exporter)
+  # Nginx Exporter (using nginx-prometheus-exporter for stub_status)
   nginx-exporter:
     image: nginx/nginx-prometheus-exporter:latest
     container_name: nginx-exporter
     command:
-      - '-nginx.scrape-uri=http://nginx:80/nginx_status'
+      - '-nginx.scrape-uri=http://nginx-proxy:80/nginx_status'
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    depends_on:
+      nginx:
+        condition: service_healthy
+
+  # Nginx Log Exporter (parses access logs for status codes and latency)
+  nginx-log-exporter:
+    image: quay.io/martinhelmich/prometheus-nginxlog-exporter:latest
+    container_name: nginx-log-exporter
+    command:
+      - '-config-file'
+      - '/etc/nginxlog-exporter/config.hcl'
+    volumes:
+      - ./nginx/logs:/var/log/nginx:ro
+      - ./monitoring/nginx-log-exporter-config.hcl:/etc/nginxlog-exporter/config.hcl:ro
     restart: unless-stopped
     networks:
       - opareta-network
@@ -308,6 +329,8 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_DATASOURCES_ALLOW_EDITING=true
+      - GF_INSTALL_PLUGINS=
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
@@ -316,7 +339,14 @@ services:
     networks:
       - opareta-network
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
 volumes:
   auth-db-data:
