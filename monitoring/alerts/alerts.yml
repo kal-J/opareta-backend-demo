@@ -1,0 +1,215 @@
+groups:
+  - name: service_health
+    interval: 30s
+    rules:
+      # Service Down Alert
+      - alert: ServiceDown
+        expr: up{job=~"auth-service|payments-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute."
+
+      # Service Health Check Failure
+      - alert: ServiceHealthCheckFailed
+        expr: |
+          (
+            http_request_duration_seconds_count{job="auth-service",code!~"2.."} > 0
+            or
+            http_request_duration_seconds_count{job="payments-service",code!~"2.."} > 0
+          )
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Service {{ $labels.job }} health check failing"
+          description: "Service {{ $labels.job }} is returning non-2xx responses."
+
+  - name: error_rates
+    interval: 30s
+    rules:
+      # High Error Rate Alert
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job=~"auth-service|payments-service",code=~"5.."}[5m])) 
+            / 
+            sum(rate(http_requests_total{job=~"auth-service|payments-service"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected ({{ $value | humanizePercentage }})"
+          description: "Error rate is above 5% for the last 5 minutes."
+
+      # Payment Failure Rate
+      - alert: HighPaymentFailureRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="payments-service",code=~"4..|5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="payments-service"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High payment failure rate ({{ $value | humanizePercentage }})"
+          description: "Payment failure rate is above 5% for the last 5 minutes."
+
+  - name: system_resources
+    interval: 30s
+    rules:
+      # Low Disk Space Alert
+      - alert: LowDiskSpace
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/"} 
+            / 
+            node_filesystem_size_bytes{mountpoint="/"}
+          ) < 0.20
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk space is below 20% ({{ $value | humanizePercentage }} available)."
+
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% ({{ $value | humanize }}% used)."
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+            /
+            node_memory_MemTotal_bytes
+          ) > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 90% ({{ $value | humanizePercentage }} used)."
+
+  - name: database
+    interval: 30s
+    rules:
+      # Auth Database Connection Issues
+      - alert: HighAuthDatabaseConnections
+        expr: |
+          pg_stat_database_numbackends{job="postgres-exporter-auth",datname=~"auth_db"} > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database connections on auth_db"
+          description: "Auth database has {{ $value }} active connections (threshold: 80)."
+
+      # Payments Database Connection Issues
+      - alert: HighPaymentsDatabaseConnections
+        expr: |
+          pg_stat_database_numbackends{job="postgres-exporter-payments",datname=~"payments_db"} > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database connections on payments_db"
+          description: "Payments database has {{ $value }} active connections (threshold: 80)."
+
+      # Auth Database Down
+      - alert: AuthDatabaseDown
+        expr: up{job="postgres-exporter-auth"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Auth database is down"
+          description: "PostgreSQL auth database exporter is not responding."
+
+      # Payments Database Down
+      - alert: PaymentsDatabaseDown
+        expr: up{job="postgres-exporter-payments"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Payments database is down"
+          description: "PostgreSQL payments database exporter is not responding."
+
+  - name: redis
+    interval: 30s
+    rules:
+      # Redis Down
+      - alert: RedisDown
+        expr: up{job="redis-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is down"
+          description: "Redis exporter is not responding."
+
+      # High Redis Queue Depth
+      - alert: HighRedisQueueDepth
+        expr: redis_queue_length > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Redis queue depth"
+          description: "Redis queue depth is {{ $value }} (threshold: 1000)."
+
+      # Redis Memory Usage
+      - alert: HighRedisMemoryUsage
+        expr: |
+          (
+            redis_memory_used_bytes
+            /
+            redis_memory_max_bytes
+          ) > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Redis memory usage"
+          description: "Redis memory usage is above 90% ({{ $value | humanizePercentage }} used)."
+
+  - name: performance
+    interval: 30s
+    rules:
+      # High Request Latency
+      - alert: HighRequestLatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_request_duration_seconds_bucket{job=~"auth-service|payments-service"}[5m])) by (le, job)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High request latency on {{ $labels.job }}"
+          description: "95th percentile latency is {{ $value }}s (threshold: 1.0s)."
+
+      # Low Request Rate
+      - alert: LowRequestRate
+        expr: |
+          sum(rate(http_requests_total{job=~"auth-service|payments-service"}[5m])) < 0.1
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low request rate detected"
+          description: "Request rate is below 0.1 req/s for the last 10 minutes."

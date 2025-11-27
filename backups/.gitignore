@@ -1,0 +1,11 @@
+.env
+# Backup files
+data/*.sql.gz
+
+# Logs
+logs/*.log
+
+# Don't ignore directories
+!data/.gitkeep
+!logs/.gitkeep
+

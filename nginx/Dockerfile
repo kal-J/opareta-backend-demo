@@ -3,7 +3,7 @@ FROM nginx:alpine
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY conf.d/opareta.conf /etc/nginx/conf.d/opareta.conf
-COPY conf.d/upstream.conf.template /etc/nginx/conf.d/upstream.conf.template
+COPY conf.d/upstream.conf /etc/nginx/conf.d/upstream.conf
 
 # Create SSL directory
 RUN mkdir -p /etc/nginx/ssl
@@ -14,12 +14,6 @@ COPY ssl/opareta.key /etc/nginx/ssl/opareta.key
 
 # Create log directories
 RUN mkdir -p /var/log/nginx
-
-# Create initial upstream.conf from template (will be overwritten by generate-upstream.sh)
-RUN cp /etc/nginx/conf.d/upstream.conf.template /etc/nginx/conf.d/upstream.conf || \
-    echo "# Upstream configuration will be generated" > /etc/nginx/conf.d/upstream.conf && \
-    echo "upstream auth_backend { server auth:3001; }" >> /etc/nginx/conf.d/upstream.conf && \
-    echo "upstream payments_backend { server payments:3002; }" >> /etc/nginx/conf.d/upstream.conf
 
 # Expose ports
 EXPOSE 80 443

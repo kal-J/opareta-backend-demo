@@ -1,0 +1,6 @@
+backups/*.sql.gz
+logs/*.log
+*.md
+.gitignore
+systemd/
+

@@ -1,0 +1,5 @@
+# PostgreSQL Daily Backup Cron Job
+# Runs daily at 2:00 AM
+0 2 * * * /usr/local/bin/backup-postgres.sh >> /backups/logs/cron.log 2>&1
+
+# Empty line required at end of crontab

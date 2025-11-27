@@ -156,11 +156,126 @@ services:
       retries: 3
       start_period: 10s
 
+  # Database backup service
+  db-backups:
+    build:
+      context: ./backups
+      dockerfile: Dockerfile
+    container_name: db-backups
+    env_file:
+      - ./backups/.env
+    environment:
+      # Auth database configuration
+      - AUTH_DB_HOST=${AUTH_DB_HOST:-auth-db}
+      - AUTH_DB_PORT=${AUTH_DB_PORT:-5432}
+      - AUTH_DB_USER=${AUTH_DB_USER:-auth_user}
+      - AUTH_DB_PASSWORD=${AUTH_DB_PASSWORD:-auth_password}
+      - AUTH_DB_NAME=${AUTH_DB_NAME:-auth_db}
+      # Payments database configuration
+      - PAYMENTS_DB_HOST=${PAYMENTS_DB_HOST:-payments-db}
+      - PAYMENTS_DB_PORT=${PAYMENTS_DB_PORT:-5432}
+      - PAYMENTS_DB_USER=${PAYMENTS_DB_USER:-payments_user}
+      - PAYMENTS_DB_PASSWORD=${PAYMENTS_DB_PASSWORD:-payments_password}
+      - PAYMENTS_DB_NAME=${PAYMENTS_DB_NAME:-payments_db}
+      # Backup configuration
+      - BACKUP_DIR=/backups/data
+      - LOG_DIR=/backups/logs
+      - RETENTION_DAYS=7
+    volumes:
+      - ./backups/data:/backups/data
+      - ./backups/logs:/backups/logs
+    depends_on:
+      - auth-db
+      - payments-db
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /backups/logs/cron.log || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Node Exporter - System metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    restart: unless-stopped
+    networks:
+      - opareta-network
+
+  # PostgreSQL Exporter for Auth Database
+  postgres-exporter-auth:
+    image: quay.io/prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter-auth
+    env_file:
+      - ./auth/.env
+    environment:
+      # Read from .env file: DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME
+      # Fallback to POSTGRES_* (used by auth-db container), then defaults
+      - DATA_SOURCE_NAME=postgresql://${DATABASE_USER:-${POSTGRES_USER:-auth_user}}:${DATABASE_PASSWORD:-${POSTGRES_PASSWORD:-auth_password}}@auth-db:5432/${DATABASE_NAME:-${POSTGRES_DB:-auth_db}}?sslmode=disable
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    depends_on:
+      - auth-db
+
+  # PostgreSQL Exporter for Payments Database
+  postgres-exporter-payments:
+    image: quay.io/prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter-payments
+    env_file:
+      - ./payments/.env
+    environment:
+      # Read from .env file: DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME
+      # Fallback to POSTGRES_* (used by payments-db container), then defaults
+      - DATA_SOURCE_NAME=postgresql://${DATABASE_USER:-${POSTGRES_USER:-payments_user}}:${DATABASE_PASSWORD:-${POSTGRES_PASSWORD:-payments_password}}@payments-db:5432/${DATABASE_NAME:-${POSTGRES_DB:-payments_db}}?sslmode=disable
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    depends_on:
+      - payments-db
+
+  # Redis Exporter
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    environment:
+      - REDIS_ADDR=redis:6379
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    depends_on:
+      - redis
+
+  # Nginx Exporter (using nginx-prometheus-exporter)
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:latest
+    container_name: nginx-exporter
+    command:
+      - '-nginx.scrape-uri=http://nginx:80/nginx_status'
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    depends_on:
+      - nginx
+
+  # Prometheus
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -170,10 +285,38 @@ services:
       - '--web.enable-lifecycle'
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/alerts:/etc/prometheus/alerts
       - prometheus-data:/prometheus
     restart: unless-stopped
     networks:
       - opareta-network
+    depends_on:
+      - node-exporter
+      - postgres-exporter-auth
+      - postgres-exporter-payments
+      - redis-exporter
+      - nginx-exporter
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    depends_on:
+      - prometheus
 
 volumes:
   auth-db-data:
@@ -183,6 +326,8 @@ volumes:
   redis-data:
     driver: local
   prometheus-data:
+    driver: local
+  grafana-data:
     driver: local
 
 networks:
