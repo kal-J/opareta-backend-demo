@@ -1,0 +1,180 @@
+name: Zero-Downtime Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to deploy (auth, payments, or all)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - auth
+          - payments
+      skip_validation:
+        description: "Skip deployment validation"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  DOCKER_COMPOSE_FILE: docker-compose.yml
+  HEALTH_CHECK_TIMEOUT: 120
+  HEALTH_CHECK_INTERVAL: 5
+  MAX_ROLLBACK_ATTEMPTS: 3
+
+jobs:
+  deploy:
+    name: Deploy Services
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Determine services to deploy
+        id: services
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            SERVICE="${{ github.event.inputs.service }}"
+          else
+            # Determine changed services based on git diff
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || echo "")
+            SERVICE="all"
+            if echo "$CHANGED_FILES" | grep -q "^auth/"; then
+              if echo "$CHANGED_FILES" | grep -q "^payments/"; then
+                SERVICE="all"
+              else
+                SERVICE="auth"
+              fi
+            elif echo "$CHANGED_FILES" | grep -q "^payments/"; then
+              SERVICE="payments"
+            fi
+          fi
+          echo "service=$SERVICE" >> $GITHUB_OUTPUT
+          echo "Deploying service: $SERVICE"
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Copy files to deployment server
+        run: |
+          # Create deployment package
+          tar -czf deploy.tar.gz \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            --exclude='*.log' \
+            --exclude='.env' \
+            .
+
+          # Copy to server (adjust host/user as needed)
+          # For local testing, this can be skipped if deploying on same machine
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ]; then
+            scp -o StrictHostKeyChecking=no deploy.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/
+            ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+              "cd /opt/opareta && tar -xzf /tmp/deploy.tar.gz && rm /tmp/deploy.tar.gz"
+          fi
+
+      - name: Deploy with rolling update
+        id: deploy
+        run: |
+          SERVICE="${{ steps.services.outputs.service }}"
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ]; then
+            # Remote deployment
+            ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
+              cd /opt/opareta
+              chmod +x .github/scripts/*.sh
+              ./.github/scripts/deploy-rolling.sh "$SERVICE" "${{ env.HEALTH_CHECK_TIMEOUT }}" "${{ env.HEALTH_CHECK_INTERVAL }}"
+            EOF
+          else
+            # Local deployment (for testing)
+            chmod +x .github/scripts/deploy-rolling.sh
+            ./.github/scripts/deploy-rolling.sh "$SERVICE" "${{ env.HEALTH_CHECK_TIMEOUT }}" "${{ env.HEALTH_CHECK_INTERVAL }}"
+          fi
+        continue-on-error: true
+
+      - name: Validate deployment
+        if: steps.deploy.outcome == 'success' && github.event.inputs.skip_validation != 'true'
+        run: |
+          SERVICE="${{ steps.services.outputs.service }}"
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ]; then
+            # Remote validation
+            ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
+              cd /opt/opareta
+              chmod +x .github/scripts/validate-deployment.sh
+              ./.github/scripts/validate-deployment.sh "$SERVICE"
+            EOF
+          else
+            # Local validation
+            chmod +x .github/scripts/validate-deployment.sh
+            ./.github/scripts/validate-deployment.sh "$SERVICE"
+          fi
+        continue-on-error: true
+
+      - name: Rollback on failure
+        if: steps.deploy.outcome == 'failure' || (steps.validate.outcome == 'failure' && steps.deploy.outcome == 'success')
+        run: |
+          SERVICE="${{ steps.services.outputs.service }}"
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ]; then
+            # Remote rollback
+            ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
+              cd /opt/opareta
+              chmod +x .github/scripts/rollback.sh
+              ./.github/scripts/rollback.sh "$SERVICE" "${{ env.MAX_ROLLBACK_ATTEMPTS }}"
+            EOF
+          else
+            # Local rollback
+            chmod +x .github/scripts/rollback.sh
+            ./.github/scripts/rollback.sh "$SERVICE" "${{ env.MAX_ROLLBACK_ATTEMPTS }}"
+          fi
+        continue-on-error: true
+
+      - name: Save deployment state
+        if: steps.deploy.outcome == 'success'
+        run: |
+          SERVICE="${{ steps.services.outputs.service }}"
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ]; then
+            ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
+              cd /opt/opareta
+              mkdir -p .deployment
+              echo "${{ github.sha }}" > .deployment/commit_sha
+              echo "${{ github.run_id }}" > .deployment/run_id
+              echo "$SERVICE" > .deployment/services
+              echo "\$(date -u +%Y%m%d_%H%M%S)" > .deployment/timestamp
+            EOF
+          else
+            mkdir -p .deployment
+            echo "${{ github.sha }}" > .deployment/commit_sha
+            echo "${{ github.run_id }}" > .deployment/run_id
+            echo "${{ steps.services.outputs.service }}" > .deployment/services
+            echo "$(date -u +%Y%m%d_%H%M%S)" > .deployment/timestamp
+          fi
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service**: ${{ steps.services.outputs.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ steps.deploy.outcome }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.deploy.outcome }}" == "failure" ]; then
+            echo "- **Rollback**: Attempted" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if deployment failed
+        if: steps.deploy.outcome == 'failure' || (steps.validate.outcome == 'failure' && steps.deploy.outcome == 'success')
+        run: |
+          echo "Deployment failed. Check logs above for details."
+          exit 1
