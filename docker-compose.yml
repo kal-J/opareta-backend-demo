@@ -1,11 +1,10 @@
 services:
+  # Auth service (scaled to 2 instances via docker-compose up --scale auth=2)
   auth:
     build:
       context: ./auth
       dockerfile: Dockerfile
-    container_name: auth-service
-    ports:
-      - "3001:3001"
+    # No container_name - allows Docker to create multiple instances
     environment:
       - PORT=3001
       - JWT_SECRET=${JWT_SECRET:-15zw8t6t5q1nbo1cm97eulio4hzg2evq}
@@ -55,13 +54,12 @@ services:
     networks:
       - opareta-network
 
+  # Payments service (scaled to 2 instances via docker-compose up --scale payments=2)
   payments:
     build:
       context: ./payments
       dockerfile: Dockerfile
-    container_name: payments-service
-    ports:
-      - "3002:3002"
+    # No container_name - allows Docker to create multiple instances
     env_file:
       - ./payments/.env
     environment:
@@ -132,6 +130,31 @@ services:
     restart: unless-stopped
     networks:
       - opareta-network
+
+  # Nginx reverse proxy and load balancer
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - auth
+      - payments
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    restart: unless-stopped
+    networks:
+      - opareta-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost/nginx-health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   prometheus:
     image: prom/prometheus:latest
