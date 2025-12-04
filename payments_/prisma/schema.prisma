@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model Currency {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  payments Payment[]
+}
+
+model PaymentProvider {
+  id              Int             @id @default(autoincrement())
+  name            String          @unique
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @updatedAt
+  payment_methods PaymentMethod[]
+  payments        Payment[]
+}
+
+model PaymentMethod {
+  id                  Int             @id @default(autoincrement())
+  name                String          @unique
+  description         String?
+  payment_provider_id Int
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @updatedAt
+  payment_provider    PaymentProvider @relation(fields: [payment_provider_id], references: [id])
+  payments            Payment[]
+}
+
+model Payment {
+  id                      Int              @id @default(autoincrement())
+  reference_id            String           @unique
+  customer_phone          String
+  customer_email          String?
+  amount                  Float
+  status                  PaymentStatus    @default(INITIATED)
+  payment_method_id       Int
+  currency_id             Int
+  provider_transaction_id String?
+  provider_name           String?
+  created_at              DateTime         @default(now())
+  updated_at              DateTime         @updatedAt
+  webhook_events          WebhookEvent[]
+  payment_method          PaymentMethod    @relation(fields: [payment_method_id], references: [id])
+  currency                Currency         @relation(fields: [currency_id], references: [id])
+  paymentProvider         PaymentProvider? @relation(fields: [paymentProviderId], references: [id])
+  paymentProviderId       Int?
+}
+
+model WebhookEvent {
+  id                      Int           @id @default(autoincrement())
+  payment_reference_id    String        @unique
+  status                  PaymentStatus
+  provider_transaction_id String        @unique
+  timestamp               DateTime
+  is_processed            Boolean       @default(false)
+  created_at              DateTime      @default(now())
+  updated_at              DateTime      @updatedAt
+  payment                 Payment?      @relation(fields: [payment_reference_id], references: [reference_id])
+}
